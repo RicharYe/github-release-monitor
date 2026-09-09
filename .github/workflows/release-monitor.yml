@@ -1,19 +1,13 @@
-```yaml
 name: GitHub Release Monitor
 
 on:
   schedule:
-    # 每 30 分钟检查一次
     - cron: "*/30 * * * *"
-
-  # 允许在 GitHub Actions 页面手动运行
   workflow_dispatch:
 
-# 允许 Action 修改仓库中的 state.json
 permissions:
   contents: write
 
-# 防止多个 Action 同时运行导致 state.json 冲突
 concurrency:
   group: github-release-monitor
   cancel-in-progress: false
@@ -24,34 +18,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ============================================================
-      # 1. Checkout
-      # ============================================================
       - name: Checkout repository
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # ============================================================
-      # 2. Python
-      # ============================================================
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.x"
 
-      # ============================================================
-      # 3. 安装依赖
-      # ============================================================
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests
+        run: python -m pip install requests
 
-      # ============================================================
-      # 4. GitHub Release Monitor
-      # ============================================================
       - name: Check GitHub Releases
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -64,47 +44,13 @@ jobs:
           echo " GitHub Release Monitor"
           echo "========================================"
 
-          # ----------------------------------------------------------
-          # 监控仓库列表
-          # ----------------------------------------------------------
-          # 每行一个：
-          # owner/repository
-          #
-          # 例如：
-          # clash-verge-rev/clash-verge-rev
-          # OpenListTeam/OpenList
-          #
-          REPOSITORIES=(
-            "clash-verge-rev/clash-verge-rev"
-            "OpenListTeam/OpenList"
-            "RaiDrive/RaiDrive"
-            "happycola233/tchMaterial-parser"
-          )
-
-          STATE_FILE="state.json"
-
-          # ----------------------------------------------------------
-          # 初始化 state.json
-          # ----------------------------------------------------------
-          if [ ! -f "$STATE_FILE" ]; then
-            echo "{}" > "$STATE_FILE"
-          fi
-
-          # ----------------------------------------------------------
-          # 使用 Python 执行监控
-          # ----------------------------------------------------------
           python <<'PY'
           import json
           import os
-          import sys
           import time
           import requests
 
           STATE_FILE = "state.json"
-
-          GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
-          NTFY_URL = os.environ.get("NTFY_URL", "").strip()
-          NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "").strip()
 
           REPOSITORIES = [
               "clash-verge-rev/clash-verge-rev",
@@ -113,9 +59,14 @@ jobs:
               "happycola233/tchMaterial-parser",
           ]
 
-          # ==========================================================
-          # 读取 state.json
-          # ==========================================================
+          GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+          NTFY_URL = os.environ.get("NTFY_URL", "").strip()
+          NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "").strip()
+
+          # ========================================
+          # 读取状态
+          # ========================================
+
           try:
               with open(STATE_FILE, "r", encoding="utf-8") as f:
                   state = json.load(f)
@@ -126,9 +77,10 @@ jobs:
           except Exception:
               state = {}
 
-          # ==========================================================
-          # GitHub API Session
-          # ==========================================================
+          # ========================================
+          # GitHub API
+          # ========================================
+
           session = requests.Session()
 
           session.headers.update({
@@ -140,10 +92,11 @@ jobs:
           if GITHUB_TOKEN:
               session.headers["Authorization"] = f"Bearer {GITHUB_TOKEN}"
 
-          # ==========================================================
-          # ntfy 通知函数
-          # ==========================================================
-          def send_ntfy(repo, version, release_name, published_at, url):
+          # ========================================
+          # ntfy
+          # ========================================
+
+          def send_ntfy(repo, version, release_name, published_at, release_url):
 
               if not NTFY_URL:
                   print("WARNING: NTFY_URL is not configured.")
@@ -153,39 +106,34 @@ jobs:
                   print("WARNING: NTFY_TOPIC is not configured.")
                   return False
 
-              base_url = NTFY_URL.rstrip("/")
+              notify_url = (
+                  NTFY_URL.rstrip("/")
+                  + "/"
+                  + NTFY_TOPIC
+              )
 
-              # 支持：
-              # NTFY_URL=https://ntfy.sh
-              #
-              # 最终：
-              # https://ntfy.sh/TOPIC
-              #
-              notify_url = f"{base_url}/{NTFY_TOPIC}"
-
-              title = f"GitHub Release 更新：{repo}"
+              title = "GitHub Release 更新"
 
               message = (
                   f"仓库：{repo}\n"
                   f"版本：{version}\n"
                   f"名称：{release_name}\n"
                   f"发布时间：{published_at}\n"
-                  f"Release：{url}"
+                  f"Release：{release_url}"
               )
 
               headers = {
                   "Title": title,
                   "Priority": "4",
                   "Tags": "github,new_release",
-                  "Click": url,
+                  "Click": release_url,
               }
 
               print("")
               print("----------------------------------------")
-              print("Sending ntfy notification...")
+              print("Sending ntfy notification")
               print(f"Repository : {repo}")
               print(f"Version    : {version}")
-              print(f"ntfy URL   : {base_url}/{NTFY_TOPIC}")
               print("----------------------------------------")
 
               try:
@@ -196,107 +144,146 @@ jobs:
                       timeout=30,
                   )
 
-                  print(f"ntfy HTTP status: {response.status_code}")
+                  print(
+                      "ntfy HTTP status: "
+                      + str(response.status_code)
+                  )
 
                   if 200 <= response.status_code < 300:
                       print("Notification sent successfully.")
                       return True
 
                   print("ERROR: ntfy notification failed.")
-                  print(f"Response: {response.text}")
+                  print(response.text)
                   return False
 
               except Exception as e:
-                  print(f"ERROR: ntfy request failed: {e}")
+                  print("ERROR: ntfy request failed.")
+                  print(str(e))
                   return False
 
+          # ========================================
+          # 开始检查
+          # ========================================
 
-          # ==========================================================
-          # 检查每一个仓库
-          # ==========================================================
-          changed = False
+          state_changed = False
 
           for repo in REPOSITORIES:
 
               print("")
               print("----------------------------------------")
-              print(f"Checking: {repo}")
+              print("Checking: " + repo)
               print("----------------------------------------")
 
-              api_url = f"https://api.github.com/repos/{repo}/releases/latest"
+              api_url = (
+                  "https://api.github.com/repos/"
+                  + repo
+                  + "/releases/latest"
+              )
 
               try:
-                  response = session.get(api_url, timeout=30)
+                  response = session.get(
+                      api_url,
+                      timeout=30
+                  )
 
               except Exception as e:
                   print("WARNING: GitHub API request failed")
-                  print(f"Reason: {e}")
-                  print(f"Skipping: {repo}")
+                  print("Reason: " + str(e))
+                  print("Skipping: " + repo)
                   continue
 
-              # ------------------------------------------------------
-              # API 请求失败
-              # ------------------------------------------------------
+              # ====================================
+              # API 错误
+              # ====================================
+
               if response.status_code != 200:
+
                   print("WARNING: GitHub API request failed")
-                  print(f"HTTP status: {response.status_code}")
+                  print(
+                      "HTTP status: "
+                      + str(response.status_code)
+                  )
 
                   try:
                       error_data = response.json()
-                      print(f"GitHub message: {error_data.get('message', 'Unknown error')}")
+                      print(
+                          "GitHub message: "
+                          + str(
+                              error_data.get(
+                                  "message",
+                                  "Unknown error"
+                              )
+                          )
+                      )
                   except Exception:
                       pass
 
-                  print(f"Skipping: {repo}")
+                  print("Skipping: " + repo)
                   continue
 
-              # ------------------------------------------------------
+              # ====================================
               # 读取 Release
-              # ------------------------------------------------------
+              # ====================================
+
               try:
                   release = response.json()
-
               except Exception as e:
-                  print("WARNING: Failed to parse GitHub API response")
-                  print(f"Reason: {e}")
-                  print(f"Skipping: {repo}")
+                  print("WARNING: Invalid GitHub response")
+                  print("Reason: " + str(e))
+                  print("Skipping: " + repo)
                   continue
 
               tag_name = release.get("tag_name", "")
-              release_name = release.get("name") or tag_name
-              published_at = release.get("published_at", "")
-              release_url = release.get("html_url", "")
+              release_name = (
+                  release.get("name")
+                  or tag_name
+              )
+              published_at = (
+                  release.get("published_at", "")
+              )
+              release_url = (
+                  release.get("html_url", "")
+              )
 
               if not tag_name:
-                  print("WARNING: No release tag found.")
-                  print(f"Skipping: {repo}")
+                  print("WARNING: No release found.")
+                  print("Skipping: " + repo)
                   continue
 
-              print(f"Latest release : {tag_name}")
-              print(f"Release name   : {release_name}")
-              print(f"Published      : {published_at}")
+              print("Latest release : " + tag_name)
+              print("Release name   : " + release_name)
+              print("Published      : " + published_at)
 
-              # ======================================================
-              # 获取之前记录的版本
-              # ======================================================
               previous_version = state.get(repo)
+
+              # ====================================
+              # 第一次检查
+              # ====================================
 
               if previous_version is None:
 
                   print("Previous version: none")
                   print("First check for this repository.")
-                  print("Recording current version without notification.")
+                  print(
+                      "Recording current version "
+                      "without notification."
+                  )
 
                   state[repo] = tag_name
-                  changed = True
+                  state_changed = True
 
                   continue
 
-              print(f"Previous version: {previous_version}")
+              print(
+                  "Previous version: "
+                  + str(previous_version)
+              )
 
-              # ======================================================
-              # 判断是否新版本
-              # ======================================================
+              # ====================================
+              # 没有新版本
+              # ====================================
+
               if previous_version == tag_name:
 
                   print("No new release.")
@@ -304,63 +291,58 @@ jobs:
 
                   continue
 
-              # ======================================================
+              # ====================================
               # 发现新版本
-              # ======================================================
+              # ====================================
+
               print("")
               print("****************************************")
               print(" NEW RELEASE DETECTED!")
               print("****************************************")
-              print(f"Repository : {repo}")
-              print(f"Previous   : {previous_version}")
-              print(f"Latest     : {tag_name}")
-              print(f"Name       : {release_name}")
-              print(f"Published  : {published_at}")
-              print(f"URL        : {release_url}")
+              print("Repository : " + repo)
+              print("Previous   : " + str(previous_version))
+              print("Latest     : " + tag_name)
+              print("Name       : " + release_name)
+              print("Published  : " + published_at)
+              print("URL        : " + release_url)
               print("****************************************")
 
-              # ------------------------------------------------------
-              # 发送 ntfy
-              # ------------------------------------------------------
-              notification_sent = send_ntfy(
-                  repo=repo,
-                  version=tag_name,
-                  release_name=release_name,
-                  published_at=published_at,
-                  url=release_url,
+              send_ntfy(
+                  repo,
+                  tag_name,
+                  release_name,
+                  published_at,
+                  release_url
               )
 
-              # ------------------------------------------------------
-              # 无论 ntfy 是否成功，都先更新版本状态
-              #
-              # 这样同一个 Release 不会重复通知。
-              # ------------------------------------------------------
+              # 更新状态，避免重复通知
               state[repo] = tag_name
-              changed = True
+              state_changed = True
 
-              if notification_sent:
-                  print("ntfy notification: SUCCESS")
-              else:
-                  print("ntfy notification: FAILED")
-
-              # 避免短时间大量请求
               time.sleep(1)
 
-          # ==========================================================
+          # ========================================
           # 保存 state.json
-          # ==========================================================
-          if changed:
+          # ========================================
+
+          if state_changed:
 
               print("")
               print("Updating state.json...")
 
-              with open(STATE_FILE, "w", encoding="utf-8") as f:
+              with open(
+                  STATE_FILE,
+                  "w",
+                  encoding="utf-8"
+              ) as f:
+
                   json.dump(
                       state,
                       f,
                       ensure_ascii=False,
-                      indent=2,
+                      indent=2
                   )
+
                   f.write("\n")
 
               print("state.json updated.")
@@ -369,14 +351,10 @@ jobs:
 
               print("")
               print("No state changes.")
-              print("state.json does not need updating.")
 
           PY
 
-      # ============================================================
-      # 5. 保存 state.json
-      # ============================================================
-      - name: Commit and push state.json
+      - name: Commit and push state
         run: |
           set -e
 
@@ -389,7 +367,6 @@ jobs:
 
           git add state.json
 
-          # 如果没有变化，就不提交
           if git diff --cached --quiet; then
             echo "No changes to commit."
             exit 0
@@ -397,34 +374,18 @@ jobs:
 
           git commit -m "Update release monitor state"
 
-          # ----------------------------------------------------------
-          # 关键修复：
-          #
-          # GitHub Actions checkout 后，如果远程 main 在运行期间
-          # 有新的提交，直接 git push 会出现：
-          #
-          # ! [rejected] main -> main (fetch first)
-          #
-          # 所以这里先获取远程，再 rebase。
-          # ----------------------------------------------------------
-
-          echo ""
-          echo "Fetching latest remote main..."
+          echo "Fetching latest main..."
 
           git fetch origin main
 
-          echo ""
-          echo "Rebasing local commit onto origin/main..."
+          echo "Rebasing..."
 
           git rebase origin/main
 
-          echo ""
-          echo "Pushing state.json..."
+          echo "Pushing..."
 
           git push origin HEAD:main
 
-          echo ""
           echo "========================================"
           echo " State saved successfully"
           echo "========================================"
-```
