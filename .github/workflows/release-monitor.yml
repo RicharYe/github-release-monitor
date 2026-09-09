@@ -44,7 +44,6 @@ jobs:
 
           NTFY_URL: ${{ secrets.NTFY_URL }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-          NTFY_EMAIL: ${{ secrets.NTFY_EMAIL }}
           NTFY_AUTH: ${{ secrets.NTFY_AUTH }}
 
         run: |
@@ -75,7 +74,6 @@ jobs:
 
           NTFY_URL = os.environ.get("NTFY_URL", "").strip()
           NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "").strip()
-          NTFY_EMAIL = os.environ.get("NTFY_EMAIL", "").strip()
           NTFY_AUTH = os.environ.get("NTFY_AUTH", "").strip()
 
 
@@ -183,13 +181,6 @@ jobs:
                   return False
 
 
-              if not NTFY_EMAIL:
-
-                  print("ERROR: NTFY_EMAIL is not configured.")
-
-                  return False
-
-
               if not NTFY_AUTH:
 
                   print("ERROR: NTFY_AUTH is not configured.")
@@ -251,7 +242,7 @@ jobs:
                       release_url,
 
                   "Email":
-                      NTFY_EMAIL,
+                      "yes",
               }
 
 
