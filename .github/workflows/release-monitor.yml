@@ -24,29 +24,53 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
+      # ================================================================
+      # Checkout
+      # ================================================================
+
       - name: Checkout repository
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+
+      # ================================================================
+      # Python
+      # ================================================================
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.x"
 
+
+      # ================================================================
+      # Install requests
+      # ================================================================
+
       - name: Install dependencies
         run: python -m pip install requests
 
+
+      # ================================================================
+      # Check GitHub Releases
+      # ================================================================
+
       - name: Check GitHub Releases
+
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
           NTFY_URL: ${{ secrets.NTFY_URL }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+
+          # ntfy Access Token
           NTFY_AUTH: ${{ secrets.NTFY_AUTH }}
 
         run: |
+
           set -euo pipefail
 
           python <<'PY'
@@ -63,18 +87,41 @@ jobs:
 
           STATE_FILE = "state.json"
 
+
+          # 要监测的 GitHub 仓库
           REPOSITORIES = [
               "clash-verge-rev/clash-verge-rev",
               "OpenListTeam/OpenList",
-              "RaiDrive/RaiDrive",
               "happycola233/tchMaterial-parser",
           ]
 
-          GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
 
-          NTFY_URL = os.environ.get("NTFY_URL", "").strip()
-          NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "").strip()
-          NTFY_AUTH = os.environ.get("NTFY_AUTH", "").strip()
+          # ============================================================
+          # Environment variables
+          # ============================================================
+
+          GITHUB_TOKEN = os.environ.get(
+              "GITHUB_TOKEN",
+              ""
+          ).strip()
+
+
+          NTFY_URL = os.environ.get(
+              "NTFY_URL",
+              ""
+          ).strip()
+
+
+          NTFY_TOPIC = os.environ.get(
+              "NTFY_TOPIC",
+              ""
+          ).strip()
+
+
+          NTFY_AUTH = os.environ.get(
+              "NTFY_AUTH",
+              ""
+          ).strip()
 
 
           # ============================================================
@@ -86,52 +133,107 @@ jobs:
           print(" GitHub Release Monitor")
           print("========================================")
 
-          print("Repositories : " + str(len(REPOSITORIES)))
+          print(
+              "Repositories : "
+              + str(len(REPOSITORIES))
+          )
 
           print(
               "NTFY URL     : "
-              + ("configured" if NTFY_URL else "MISSING")
+              + (
+                  "configured"
+                  if NTFY_URL
+                  else "MISSING"
+              )
           )
 
           print(
               "NTFY Topic   : "
-              + ("configured" if NTFY_TOPIC else "MISSING")
-          )
-
-          print(
-              "NTFY Email   : "
-              + ("configured" if NTFY_EMAIL else "MISSING")
+              + (
+                  "configured"
+                  if NTFY_TOPIC
+                  else "MISSING"
+              )
           )
 
           print(
               "NTFY Auth    : "
-              + ("configured" if NTFY_AUTH else "MISSING")
+              + (
+                  "configured"
+                  if NTFY_AUTH
+                  else "MISSING"
+              )
           )
 
           print("========================================")
 
 
           # ============================================================
-          # Load state
+          # Validate ntfy configuration
+          # ============================================================
+
+          if not NTFY_URL:
+
+              print("")
+              print("ERROR: NTFY_URL is not configured.")
+              print("Please check GitHub Secrets.")
+              exit(1)
+
+
+          if not NTFY_TOPIC:
+
+              print("")
+              print("ERROR: NTFY_TOPIC is not configured.")
+              print("Please check GitHub Secrets.")
+              exit(1)
+
+
+          if not NTFY_AUTH:
+
+              print("")
+              print("ERROR: NTFY_AUTH is not configured.")
+              print("Please check GitHub Secrets.")
+              exit(1)
+
+
+          # ============================================================
+          # Load state.json
           # ============================================================
 
           try:
 
-              with open(STATE_FILE, "r", encoding="utf-8") as f:
+              with open(
+                  STATE_FILE,
+                  "r",
+                  encoding="utf-8"
+              ) as f:
+
                   state = json.load(f)
+
 
               if not isinstance(state, dict):
 
-                  print("WARNING: state.json is not a dictionary.")
+                  print(
+                      "WARNING: state.json is not a dictionary."
+                  )
 
                   state = {}
 
+
           except Exception as e:
 
-              print("WARNING: state.json could not be read.")
-              print("Reason: " + str(e))
+              print(
+                  "WARNING: state.json could not be read."
+              )
 
-              print("Starting with empty state.")
+              print(
+                  "Reason: "
+                  + str(e)
+              )
+
+              print(
+                  "Starting with empty state."
+              )
 
               state = {}
 
@@ -142,16 +244,26 @@ jobs:
 
           session = requests.Session()
 
+
           session.headers.update({
-              "Accept": "application/vnd.github+json",
-              "X-GitHub-Api-Version": "2022-11-28",
-              "User-Agent": "github-release-monitor"
+
+              "Accept":
+                  "application/vnd.github+json",
+
+              "X-GitHub-Api-Version":
+                  "2022-11-28",
+
+              "User-Agent":
+                  "github-release-monitor"
+
           })
+
 
           if GITHUB_TOKEN:
 
               session.headers["Authorization"] = (
-                  "Bearer " + GITHUB_TOKEN
+                  "Bearer "
+                  + GITHUB_TOKEN
               )
 
 
@@ -167,70 +279,72 @@ jobs:
               release_url
           ):
 
-              if not NTFY_URL:
-
-                  print("ERROR: NTFY_URL is not configured.")
-
-                  return False
-
-
-              if not NTFY_TOPIC:
-
-                  print("ERROR: NTFY_TOPIC is not configured.")
-
-                  return False
-
-
-              if not NTFY_AUTH:
-
-                  print("ERROR: NTFY_AUTH is not configured.")
-
-                  return False
-
-
               # --------------------------------------------------------
               # ntfy URL
               # --------------------------------------------------------
 
               notify_url = (
+
                   NTFY_URL.rstrip("/")
+
                   + "/"
+
                   + NTFY_TOPIC
+
               )
 
 
               # --------------------------------------------------------
-              # Notification message
+              # Message
               # --------------------------------------------------------
 
               message = (
+
                   f"仓库：{repo}\n"
+
                   f"版本：{version}\n"
+
                   f"名称：{release_name}\n"
+
                   f"发布时间：{published_at}\n"
+
                   f"Release：{release_url}"
+
               )
 
 
               # --------------------------------------------------------
-              # ntfy headers
+              # Headers
               #
               # Authorization:
-              #   使用 GitHub Secret 中保存的 ntfy Token
+              #     使用 ntfy Access Token
               #
               # Email:
-              #   使用已经在 ntfy 验证过的邮箱
-              #
-              # Token 本身不会打印到日志
+              #     yes = 使用当前 ntfy 账户的
+              #     Primary / 已验证邮箱
               # --------------------------------------------------------
 
               headers = {
-                  "Authorization": "Bearer " + NTFY_AUTH,
-                  "Title": "GitHub Release Update",
-                  "Priority": "4",
-                  "Tags": "github,new_release",
-                  "Click": release_url,
-                  "Email": "yes",
+
+                  "Authorization":
+                      "Bearer "
+                      + NTFY_AUTH,
+
+                  "Title":
+                      "GitHub Release Update",
+
+                  "Priority":
+                      "4",
+
+                  "Tags":
+                      "github,new_release",
+
+                  "Click":
+                      release_url,
+
+                  "Email":
+                      "yes",
+
               }
 
 
@@ -243,16 +357,29 @@ jobs:
               print("Sending ntfy notification")
               print("----------------------------------------")
 
-              print("Repository : " + repo)
-              print("Version    : " + version)
-              print("Email      : configured")
-              print("Auth       : configured")
+              print(
+                  "Repository : "
+                  + repo
+              )
+
+              print(
+                  "Version    : "
+                  + version
+              )
+
+              print(
+                  "Auth       : configured"
+              )
+
+              print(
+                  "Email      : account email"
+              )
 
               print("----------------------------------------")
 
 
               # --------------------------------------------------------
-              # Send
+              # Send HTTP request
               # --------------------------------------------------------
 
               try:
@@ -261,17 +388,22 @@ jobs:
 
                       notify_url,
 
-                      data=message.encode("utf-8"),
+                      data=message.encode(
+                          "utf-8"
+                      ),
 
                       headers=headers,
 
                       timeout=30,
+
                   )
 
 
                   print(
                       "ntfy HTTP status: "
-                      + str(response.status_code)
+                      + str(
+                          response.status_code
+                      )
                   )
 
 
@@ -279,7 +411,11 @@ jobs:
                   # Success
                   # ----------------------------------------------------
 
-                  if 200 <= response.status_code < 300:
+                  if (
+                      200
+                      <= response.status_code
+                      < 300
+                  ):
 
                       print(
                           "Notification sent successfully."
@@ -306,7 +442,9 @@ jobs:
 
                   print(
                       "HTTP status: "
-                      + str(response.status_code)
+                      + str(
+                          response.status_code
+                      )
                   )
 
                   print(
@@ -343,26 +481,42 @@ jobs:
               print("")
               print("")
               print("========================================")
-              print("Checking: " + repo)
+
+              print(
+                  "Checking: "
+                  + repo
+              )
+
               print("========================================")
 
 
               # --------------------------------------------------------
-              # GitHub API
+              # GitHub API URL
               # --------------------------------------------------------
 
               api_url = (
+
                   "https://api.github.com/repos/"
+
                   + repo
+
                   + "/releases/latest"
+
               )
 
+
+              # --------------------------------------------------------
+              # Request GitHub
+              # --------------------------------------------------------
 
               try:
 
                   response = session.get(
+
                       api_url,
+
                       timeout=30
+
                   )
 
 
@@ -386,7 +540,7 @@ jobs:
 
 
               # --------------------------------------------------------
-              # API error
+              # GitHub API error
               # --------------------------------------------------------
 
               if response.status_code != 200:
@@ -397,13 +551,17 @@ jobs:
 
                   print(
                       "HTTP status: "
-                      + str(response.status_code)
+                      + str(
+                          response.status_code
+                      )
                   )
 
 
                   try:
 
-                      error_data = response.json()
+                      error_data = (
+                          response.json()
+                      )
 
                       print(
                           "GitHub message: "
@@ -429,7 +587,7 @@ jobs:
 
 
               # --------------------------------------------------------
-              # Parse release
+              # Parse JSON
               # --------------------------------------------------------
 
               try:
@@ -456,20 +614,32 @@ jobs:
                   continue
 
 
+              # --------------------------------------------------------
+              # Release information
+              # --------------------------------------------------------
+
               tag_name = release.get(
                   "tag_name",
                   ""
               )
 
+
               release_name = (
-                  release.get("name")
+
+                  release.get(
+                      "name"
+                  )
+
                   or tag_name
+
               )
+
 
               published_at = release.get(
                   "published_at",
                   ""
               )
+
 
               release_url = release.get(
                   "html_url",
@@ -495,6 +665,10 @@ jobs:
                   continue
 
 
+              # --------------------------------------------------------
+              # Current release
+              # --------------------------------------------------------
+
               print(
                   "Latest release : "
                   + tag_name
@@ -515,7 +689,9 @@ jobs:
               # Previous version
               # --------------------------------------------------------
 
-              previous_version = state.get(repo)
+              previous_version = state.get(
+                  repo
+              )
 
 
               # --------------------------------------------------------
@@ -533,8 +709,10 @@ jobs:
                   )
 
                   print(
-                      "Recording current version without notification."
+                      "Recording current version "
+                      "without notification."
                   )
+
 
                   state[repo] = tag_name
 
@@ -545,12 +723,14 @@ jobs:
 
               print(
                   "Previous version: "
-                  + str(previous_version)
+                  + str(
+                      previous_version
+                  )
               )
 
 
               # --------------------------------------------------------
-              # No update
+              # No new release
               # --------------------------------------------------------
 
               if previous_version == tag_name:
@@ -567,13 +747,14 @@ jobs:
 
 
               # --------------------------------------------------------
-              # New release
+              # New release detected
               # --------------------------------------------------------
 
               print("")
               print("****************************************")
               print("       NEW RELEASE DETECTED!")
               print("****************************************")
+
 
               print(
                   "Repository : "
@@ -582,7 +763,9 @@ jobs:
 
               print(
                   "Previous   : "
-                  + str(previous_version)
+                  + str(
+                      previous_version
+                  )
               )
 
               print(
@@ -625,11 +808,12 @@ jobs:
                   published_at,
 
                   release_url
+
               )
 
 
               # --------------------------------------------------------
-              # Only update state after successful notification
+              # Notification success
               # --------------------------------------------------------
 
               if notification_sent:
@@ -645,10 +829,15 @@ jobs:
                       + tag_name
                   )
 
+
                   state[repo] = tag_name
 
                   state_changed = True
 
+
+              # --------------------------------------------------------
+              # Notification failed
+              # --------------------------------------------------------
 
               else:
 
@@ -663,9 +852,14 @@ jobs:
                   )
 
                   print(
-                      "This release will be retried on the next run."
+                      "This release will be retried "
+                      "on the next run."
                   )
 
+
+              # --------------------------------------------------------
+              # Small delay
+              # --------------------------------------------------------
 
               time.sleep(1)
 
@@ -683,16 +877,25 @@ jobs:
 
 
               with open(
+
                   STATE_FILE,
+
                   "w",
+
                   encoding="utf-8"
+
               ) as f:
 
                   json.dump(
+
                       state,
+
                       f,
+
                       ensure_ascii=False,
+
                       indent=2
+
                   )
 
                   f.write("\n")
@@ -706,6 +909,7 @@ jobs:
           else:
 
               print("")
+
               print(
                   "No state changes."
               )
@@ -724,50 +928,84 @@ jobs:
 
 
       # ================================================================
-      # Save state.json
+      # Commit and push state.json
       # ================================================================
 
       - name: Commit and push state
+
         run: |
 
           set -e
+
 
           echo "========================================"
           echo " Saving monitor state"
           echo "========================================"
 
 
-          git config user.name "github-actions[bot]"
+          # ------------------------------------------------------------
+          # Git identity
+          # ------------------------------------------------------------
 
-          git config user.email \
+          git config \
+            user.name \
+            "github-actions[bot]"
+
+
+          git config \
+            user.email \
             "41898282+github-actions[bot]@users.noreply.github.com"
 
+
+          # ------------------------------------------------------------
+          # Add state
+          # ------------------------------------------------------------
 
           git add state.json
 
 
+          # ------------------------------------------------------------
+          # Nothing changed
+          # ------------------------------------------------------------
+
           if git diff --cached --quiet; then
 
-            echo "No changes to commit."
+              echo "No changes to commit."
 
-            exit 0
+              exit 0
 
           fi
 
 
+          # ------------------------------------------------------------
+          # Commit
+          # ------------------------------------------------------------
+
           git commit \
             -m "Update release monitor state"
 
+
+          # ------------------------------------------------------------
+          # Fetch latest main
+          # ------------------------------------------------------------
 
           echo "Fetching latest main..."
 
           git fetch origin main
 
 
+          # ------------------------------------------------------------
+          # Rebase
+          # ------------------------------------------------------------
+
           echo "Rebasing..."
 
           git rebase origin/main
 
+
+          # ------------------------------------------------------------
+          # Push
+          # ------------------------------------------------------------
 
           echo "Pushing..."
 
