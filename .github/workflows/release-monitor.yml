@@ -225,24 +225,12 @@ jobs:
               # --------------------------------------------------------
 
               headers = {
-
-                  "Authorization":
-                      "Bearer " + NTFY_AUTH,
-
-                  "Title":
-                      "GitHub Release Update",
-
-                  "Priority":
-                      "4",
-
-                  "Tags":
-                      "github,new_release",
-
-                  "Click":
-                      release_url,
-
-                  "Email":
-                      "yes",
+                  "Authorization": "Bearer " + NTFY_AUTH,
+                  "Title": "GitHub Release Update",
+                  "Priority": "4",
+                  "Tags": "github,new_release",
+                  "Click": release_url,
+                  "Email": "yes",
               }
 
 
