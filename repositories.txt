@@ -4,8 +4,5 @@ clash-verge-rev/clash-verge-rev
 # OpenList
 OpenListTeam/OpenList
 
-# RaiDrive
-RaiDrive/RaiDrive
-
 # tchMaterial-parser
 happycola233/tchMaterial-parser
