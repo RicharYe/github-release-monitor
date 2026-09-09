@@ -14,7 +14,6 @@ on:
 permissions:
   contents: write
 
-# 防止多个 Action 同时修改 state.json
 concurrency:
   group: github-release-monitor
   cancel-in-progress: false
@@ -25,43 +24,28 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
-      # ==========================================
-      # 1. Checkout
-      # ==========================================
-
       - name: Checkout repository
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # ==========================================
-      # 2. 安装 Python
-      # ==========================================
-
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.x"
 
-      # ==========================================
-      # 3. 安装 requests
-      # ==========================================
-
       - name: Install dependencies
         run: python -m pip install requests
-
-      # ==========================================
-      # 4. 检查 GitHub Release
-      # ==========================================
 
       - name: Check GitHub Releases
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
           NTFY_URL: ${{ secrets.NTFY_URL }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           NTFY_EMAIL: ${{ secrets.NTFY_EMAIL }}
+          NTFY_AUTH: ${{ secrets.NTFY_AUTH }}
 
         run: |
           set -euo pipefail
@@ -74,25 +58,11 @@ jobs:
           import requests
 
 
-          # ========================================
-          # 基本配置
-          # ========================================
+          # ============================================================
+          # Configuration
+          # ============================================================
 
           STATE_FILE = "state.json"
-
-
-          # ========================================
-          # 要监测的 GitHub 仓库
-          #
-          # 添加新仓库时：
-          #
-          # "用户名/仓库名",
-          #
-          # 例如：
-          #
-          # "torvalds/linux",
-          #
-          # ========================================
 
           REPOSITORIES = [
               "clash-verge-rev/clash-verge-rev",
@@ -101,48 +71,24 @@ jobs:
               "happycola233/tchMaterial-parser",
           ]
 
+          GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
 
-          # ========================================
-          # 读取 GitHub Actions Secrets
-          # ========================================
-
-          GITHUB_TOKEN = os.environ.get(
-              "GITHUB_TOKEN",
-              ""
-          )
-
-          NTFY_URL = os.environ.get(
-              "NTFY_URL",
-              ""
-          ).strip()
-
-          NTFY_TOPIC = os.environ.get(
-              "NTFY_TOPIC",
-              ""
-          ).strip()
-
-          NTFY_EMAIL = os.environ.get(
-              "NTFY_EMAIL",
-              ""
-          ).strip()
+          NTFY_URL = os.environ.get("NTFY_URL", "").strip()
+          NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "").strip()
+          NTFY_EMAIL = os.environ.get("NTFY_EMAIL", "").strip()
+          NTFY_AUTH = os.environ.get("NTFY_AUTH", "").strip()
 
 
-          # ========================================
-          # 打印配置状态
-          #
-          # 注意：
-          # 不打印真正的 Secret 内容
-          # ========================================
+          # ============================================================
+          # Header
+          # ============================================================
 
           print("")
           print("========================================")
           print(" GitHub Release Monitor")
           print("========================================")
 
-          print(
-              "Repositories : "
-              + str(len(REPOSITORIES))
-          )
+          print("Repositories : " + str(len(REPOSITORIES)))
 
           print(
               "NTFY URL     : "
@@ -159,83 +105,61 @@ jobs:
               + ("configured" if NTFY_EMAIL else "MISSING")
           )
 
+          print(
+              "NTFY Auth    : "
+              + ("configured" if NTFY_AUTH else "MISSING")
+          )
+
           print("========================================")
 
 
-          # ========================================
-          # 读取 state.json
-          # ========================================
+          # ============================================================
+          # Load state
+          # ============================================================
 
           try:
 
-              with open(
-                  STATE_FILE,
-                  "r",
-                  encoding="utf-8"
-              ) as f:
-
+              with open(STATE_FILE, "r", encoding="utf-8") as f:
                   state = json.load(f)
 
               if not isinstance(state, dict):
 
-                  print(
-                      "WARNING: state.json is not a dictionary."
-                  )
+                  print("WARNING: state.json is not a dictionary.")
 
                   state = {}
 
           except Exception as e:
 
-              print(
-                  "WARNING: state.json could not be read."
-              )
+              print("WARNING: state.json could not be read.")
+              print("Reason: " + str(e))
 
-              print(
-                  "Reason: "
-                  + str(e)
-              )
-
-              print(
-                  "Starting with empty state."
-              )
+              print("Starting with empty state.")
 
               state = {}
 
 
-          # ========================================
+          # ============================================================
           # GitHub API Session
-          # ========================================
+          # ============================================================
 
           session = requests.Session()
 
           session.headers.update({
-
-              "Accept":
-                  "application/vnd.github+json",
-
-              "X-GitHub-Api-Version":
-                  "2022-11-28",
-
-              "User-Agent":
-                  "github-release-monitor"
-
+              "Accept": "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "github-release-monitor"
           })
-
-
-          # ========================================
-          # 使用 GitHub Actions Token
-          # ========================================
 
           if GITHUB_TOKEN:
 
-              session.headers[
-                  "Authorization"
-              ] = "Bearer " + GITHUB_TOKEN
+              session.headers["Authorization"] = (
+                  "Bearer " + GITHUB_TOKEN
+              )
 
 
-          # ========================================
-          # ntfy 通知函数
-          # ========================================
+          # ============================================================
+          # Send ntfy notification
+          # ============================================================
 
           def send_ntfy(
               repo,
@@ -245,48 +169,37 @@ jobs:
               release_url
           ):
 
-              # ------------------------------------
-              # 检查 NTFY_URL
-              # ------------------------------------
-
               if not NTFY_URL:
 
-                  print(
-                      "ERROR: NTFY_URL is not configured."
-                  )
+                  print("ERROR: NTFY_URL is not configured.")
 
                   return False
 
-
-              # ------------------------------------
-              # 检查 NTFY_TOPIC
-              # ------------------------------------
 
               if not NTFY_TOPIC:
 
-                  print(
-                      "ERROR: NTFY_TOPIC is not configured."
-                  )
+                  print("ERROR: NTFY_TOPIC is not configured.")
 
                   return False
 
-
-              # ------------------------------------
-              # 检查邮箱
-              # ------------------------------------
 
               if not NTFY_EMAIL:
 
-                  print(
-                      "ERROR: NTFY_EMAIL is not configured."
-                  )
+                  print("ERROR: NTFY_EMAIL is not configured.")
 
                   return False
 
 
-              # ------------------------------------
-              # 构造 ntfy URL
-              # ------------------------------------
+              if not NTFY_AUTH:
+
+                  print("ERROR: NTFY_AUTH is not configured.")
+
+                  return False
+
+
+              # --------------------------------------------------------
+              # ntfy URL
+              # --------------------------------------------------------
 
               notify_url = (
                   NTFY_URL.rstrip("/")
@@ -295,42 +208,35 @@ jobs:
               )
 
 
-              # ------------------------------------
-              # 通知正文
-              # ------------------------------------
+              # --------------------------------------------------------
+              # Notification message
+              # --------------------------------------------------------
 
               message = (
-
                   f"仓库：{repo}\n"
-
                   f"版本：{version}\n"
-
                   f"名称：{release_name}\n"
-
                   f"发布时间：{published_at}\n"
-
                   f"Release：{release_url}"
-
               )
 
 
-              # ------------------------------------
-              # ntfy Headers
+              # --------------------------------------------------------
+              # ntfy headers
               #
-              # 注意：
+              # Authorization:
+              #   使用 GitHub Secret 中保存的 ntfy Token
               #
-              # Title 使用英文。
+              # Email:
+              #   使用已经在 ntfy 验证过的邮箱
               #
-              # 之前出现过：
-              #
-              # 'latin-1' codec can't encode characters
-              #
-              # 原因就是 HTTP Header 中放了中文。
-              #
-              # 所以 Title 不要写中文。
-              # ------------------------------------
+              # Token 本身不会打印到日志
+              # --------------------------------------------------------
 
               headers = {
+
+                  "Authorization":
+                      "Bearer " + NTFY_AUTH,
 
                   "Title":
                       "GitHub Release Update",
@@ -344,46 +250,31 @@ jobs:
                   "Click":
                       release_url,
 
-                  # --------------------------------
-                  # 邮件地址
-                  #
-                  # 从 GitHub Secret 获取
-                  # --------------------------------
-
                   "Email":
                       NTFY_EMAIL,
               }
 
 
-              # ------------------------------------
-              # 日志
-              # ------------------------------------
+              # --------------------------------------------------------
+              # Log
+              # --------------------------------------------------------
 
               print("")
               print("----------------------------------------")
               print("Sending ntfy notification")
               print("----------------------------------------")
 
-              print(
-                  "Repository : "
-                  + repo
-              )
-
-              print(
-                  "Version    : "
-                  + version
-              )
-
-              print(
-                  "Email      : configured"
-              )
+              print("Repository : " + repo)
+              print("Version    : " + version)
+              print("Email      : configured")
+              print("Auth       : configured")
 
               print("----------------------------------------")
 
 
-              # ------------------------------------
-              # 发送
-              # ------------------------------------
+              # --------------------------------------------------------
+              # Send
+              # --------------------------------------------------------
 
               try:
 
@@ -391,9 +282,7 @@ jobs:
 
                       notify_url,
 
-                      data=message.encode(
-                          "utf-8"
-                      ),
+                      data=message.encode("utf-8"),
 
                       headers=headers,
 
@@ -401,27 +290,17 @@ jobs:
                   )
 
 
-                  # --------------------------------
-                  # HTTP 状态
-                  # --------------------------------
-
                   print(
                       "ntfy HTTP status: "
-                      + str(
-                          response.status_code
-                      )
+                      + str(response.status_code)
                   )
 
 
-                  # --------------------------------
-                  # 成功
-                  # --------------------------------
+                  # ----------------------------------------------------
+                  # Success
+                  # ----------------------------------------------------
 
-                  if (
-                      200
-                      <= response.status_code
-                      < 300
-                  ):
+                  if 200 <= response.status_code < 300:
 
                       print(
                           "Notification sent successfully."
@@ -438,9 +317,9 @@ jobs:
                       return True
 
 
-                  # --------------------------------
-                  # 失败
-                  # --------------------------------
+                  # ----------------------------------------------------
+                  # Failed
+                  # ----------------------------------------------------
 
                   print(
                       "ERROR: ntfy notification failed."
@@ -448,9 +327,7 @@ jobs:
 
                   print(
                       "HTTP status: "
-                      + str(
-                          response.status_code
-                      )
+                      + str(response.status_code)
                   )
 
                   print(
@@ -475,56 +352,38 @@ jobs:
                   return False
 
 
-          # ========================================
-          # state 是否发生变化
-          # ========================================
+          # ============================================================
+          # Monitor repositories
+          # ============================================================
 
           state_changed = False
 
-
-          # ========================================
-          # 开始检查所有仓库
-          # ========================================
 
           for repo in REPOSITORIES:
 
               print("")
               print("")
               print("========================================")
-              print(
-                  "Checking: "
-                  + repo
-              )
+              print("Checking: " + repo)
               print("========================================")
 
 
-              # ------------------------------------
-              # GitHub Latest Release API
-              # ------------------------------------
+              # --------------------------------------------------------
+              # GitHub API
+              # --------------------------------------------------------
 
               api_url = (
-
                   "https://api.github.com/repos/"
-
                   + repo
-
                   + "/releases/latest"
-
               )
 
-
-              # ------------------------------------
-              # 请求 GitHub
-              # ------------------------------------
 
               try:
 
                   response = session.get(
-
                       api_url,
-
                       timeout=30
-
                   )
 
 
@@ -547,16 +406,9 @@ jobs:
                   continue
 
 
-              # ------------------------------------
-              # API 非 200
-              #
-              # 例如：
-              #
-              # RaiDrive/RaiDrive
-              #
-              # 如果仓库不存在 / 私有 / API 404
-              # 就跳过，不影响其他仓库。
-              # ------------------------------------
+              # --------------------------------------------------------
+              # API error
+              # --------------------------------------------------------
 
               if response.status_code != 200:
 
@@ -566,17 +418,13 @@ jobs:
 
                   print(
                       "HTTP status: "
-                      + str(
-                          response.status_code
-                      )
+                      + str(response.status_code)
                   )
 
 
                   try:
 
-                      error_data = (
-                          response.json()
-                      )
+                      error_data = response.json()
 
                       print(
                           "GitHub message: "
@@ -587,7 +435,6 @@ jobs:
                               )
                           )
                       )
-
 
                   except Exception:
 
@@ -602,9 +449,9 @@ jobs:
                   continue
 
 
-              # ------------------------------------
-              # 解析 JSON
-              # ------------------------------------
+              # --------------------------------------------------------
+              # Parse release
+              # --------------------------------------------------------
 
               try:
 
@@ -630,21 +477,14 @@ jobs:
                   continue
 
 
-              # ------------------------------------
-              # 获取 Release 信息
-              # ------------------------------------
-
               tag_name = release.get(
                   "tag_name",
                   ""
               )
 
               release_name = (
-
                   release.get("name")
-
                   or tag_name
-
               )
 
               published_at = release.get(
@@ -658,9 +498,9 @@ jobs:
               )
 
 
-              # ------------------------------------
-              # 没有 Release
-              # ------------------------------------
+              # --------------------------------------------------------
+              # No release
+              # --------------------------------------------------------
 
               if not tag_name:
 
@@ -675,10 +515,6 @@ jobs:
 
                   continue
 
-
-              # ------------------------------------
-              # 当前最新版本
-              # ------------------------------------
 
               print(
                   "Latest release : "
@@ -696,22 +532,16 @@ jobs:
               )
 
 
-              # ====================================
-              # 获取历史版本
-              # ====================================
+              # --------------------------------------------------------
+              # Previous version
+              # --------------------------------------------------------
 
-              previous_version = state.get(
-                  repo
-              )
+              previous_version = state.get(repo)
 
 
-              # ====================================
-              # 第一次检测
-              #
-              # 不发送通知
-              #
-              # 只记录当前版本
-              # ====================================
+              # --------------------------------------------------------
+              # First check
+              # --------------------------------------------------------
 
               if previous_version is None:
 
@@ -724,8 +554,7 @@ jobs:
                   )
 
                   print(
-                      "Recording current version "
-                      "without notification."
+                      "Recording current version without notification."
                   )
 
                   state[repo] = tag_name
@@ -735,21 +564,15 @@ jobs:
                   continue
 
 
-              # ====================================
-              # 显示之前版本
-              # ====================================
-
               print(
                   "Previous version: "
-                  + str(
-                      previous_version
-                  )
+                  + str(previous_version)
               )
 
 
-              # ====================================
-              # 没有新版本
-              # ====================================
+              # --------------------------------------------------------
+              # No update
+              # --------------------------------------------------------
 
               if previous_version == tag_name:
 
@@ -764,9 +587,9 @@ jobs:
                   continue
 
 
-              # ====================================
-              # 检测到新版本
-              # ====================================
+              # --------------------------------------------------------
+              # New release
+              # --------------------------------------------------------
 
               print("")
               print("****************************************")
@@ -780,9 +603,7 @@ jobs:
 
               print(
                   "Previous   : "
-                  + str(
-                      previous_version
-                  )
+                  + str(previous_version)
               )
 
               print(
@@ -805,18 +626,14 @@ jobs:
                   + release_url
               )
 
-              print("****************************************")
+              print(
+                  "****************************************"
+              )
 
 
-              # ====================================
-              # 发送 ntfy
-              #
-              # ntfy 会：
-              #
-              # 1. 推送手机
-              # 2. 发送邮件
-              #
-              # ====================================
+              # --------------------------------------------------------
+              # Send notification
+              # --------------------------------------------------------
 
               notification_sent = send_ntfy(
 
@@ -829,19 +646,17 @@ jobs:
                   published_at,
 
                   release_url
-
               )
 
 
-              # ====================================
-              # 通知成功
-              #
-              # 更新 state
-              # ====================================
+              # --------------------------------------------------------
+              # Only update state after successful notification
+              # --------------------------------------------------------
 
               if notification_sent:
 
                   print("")
+
                   print(
                       "Notification succeeded."
                   )
@@ -856,17 +671,10 @@ jobs:
                   state_changed = True
 
 
-              # ====================================
-              # 通知失败
-              #
-              # 不更新 state
-              #
-              # 下次继续重试
-              # ====================================
-
               else:
 
                   print("")
+
                   print(
                       "Notification FAILED."
                   )
@@ -876,21 +684,16 @@ jobs:
                   )
 
                   print(
-                      "This release will be retried "
-                      "on the next run."
+                      "This release will be retried on the next run."
                   )
 
-
-              # ====================================
-              # 请求间隔
-              # ====================================
 
               time.sleep(1)
 
 
-          # ========================================
-          # 保存 state.json
-          # ========================================
+          # ============================================================
+          # Save state.json
+          # ============================================================
 
           if state_changed:
 
@@ -901,25 +704,16 @@ jobs:
 
 
               with open(
-
                   STATE_FILE,
-
                   "w",
-
                   encoding="utf-8"
-
               ) as f:
 
                   json.dump(
-
                       state,
-
                       f,
-
                       ensure_ascii=False,
-
                       indent=2
-
                   )
 
                   f.write("\n")
@@ -938,18 +732,21 @@ jobs:
               )
 
 
+          # ============================================================
+          # Finished
+          # ============================================================
+
           print("")
           print("========================================")
           print(" Monitor finished")
           print("========================================")
 
-
           PY
 
 
-      # ==========================================
-      # 5. 保存 state.json
-      # ==========================================
+      # ================================================================
+      # Save state.json
+      # ================================================================
 
       - name: Commit and push state
         run: |
@@ -960,27 +757,15 @@ jobs:
           echo " Saving monitor state"
           echo "========================================"
 
-          # --------------------------------------
-          # Git 用户信息
-          # --------------------------------------
 
-          git config user.name \
-            "github-actions[bot]"
+          git config user.name "github-actions[bot]"
 
           git config user.email \
             "41898282+github-actions[bot]@users.noreply.github.com"
 
 
-          # --------------------------------------
-          # 添加 state.json
-          # --------------------------------------
-
           git add state.json
 
-
-          # --------------------------------------
-          # 没有变化
-          # --------------------------------------
 
           if git diff --cached --quiet; then
 
@@ -991,41 +776,19 @@ jobs:
           fi
 
 
-          # --------------------------------------
-          # 提交
-          # --------------------------------------
-
           git commit \
             -m "Update release monitor state"
 
-
-          # --------------------------------------
-          # 获取远程最新 main
-          #
-          # 防止：
-          #
-          # fetch first
-          #
-          # rejected
-          # --------------------------------------
 
           echo "Fetching latest main..."
 
           git fetch origin main
 
 
-          # --------------------------------------
-          # Rebase
-          # --------------------------------------
-
           echo "Rebasing..."
 
           git rebase origin/main
 
-
-          # --------------------------------------
-          # Push
-          # --------------------------------------
 
           echo "Pushing..."
 
