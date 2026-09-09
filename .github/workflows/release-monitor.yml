@@ -1,1 +1,328 @@
+name: GitHub Release Monitor
 
+on:
+  schedule:
+    # 每 10 分钟检查一次
+    - cron: "*/10 * * * *"
+
+  # 允许手动检查
+  workflow_dispatch:
+
+# 允许 GitHub Actions 修改 state.json
+permissions:
+  contents: write
+
+# 防止同一个工作流同时运行
+concurrency:
+  group: github-release-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ==========================================
+      # 1. 获取仓库
+      # ==========================================
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ==========================================
+      # 2. 检查 GitHub Releases
+      # ==========================================
+      - name: Check GitHub Releases
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          GH_TOKEN: ${{ github.token }}
+
+        shell: bash
+
+        run: |
+
+          set -euo pipefail
+
+          STATE_FILE="state.json"
+          REPO_FILE="repositories.txt"
+
+          echo "========================================"
+          echo " GitHub Release Monitor"
+          echo "========================================"
+
+          # ----------------------------------------
+          # 检查必要文件
+          # ----------------------------------------
+
+          if [ ! -f "$REPO_FILE" ]; then
+              echo "错误：repositories.txt 不存在"
+              exit 1
+          fi
+
+          if [ ! -f "$STATE_FILE" ]; then
+              echo "{}" > "$STATE_FILE"
+          fi
+
+          # 检查 JSON 是否有效
+          if ! jq empty "$STATE_FILE" >/dev/null 2>&1; then
+              echo "错误：state.json JSON 格式错误"
+              exit 1
+          fi
+
+          # 检查 ntfy Topic
+          if [ -z "${NTFY_TOPIC:-}" ]; then
+              echo "错误：没有设置 NTFY_TOPIC"
+              exit 1
+          fi
+
+          changed=false
+
+          # ========================================
+          # 遍历所有项目
+          # ========================================
+
+          while IFS= read -r REPO || [ -n "$REPO" ]; do
+
+              # 去除前后空格
+              REPO="$(echo "$REPO" | xargs)"
+
+              # 跳过空行
+              [ -z "$REPO" ] && continue
+
+              # 跳过注释
+              [[ "$REPO" =~ ^# ]] && continue
+
+              echo ""
+              echo "----------------------------------------"
+              echo "检查项目：$REPO"
+              echo "----------------------------------------"
+
+              # --------------------------------------
+              # 获取最新 Release
+              # --------------------------------------
+
+              RESPONSE=$(curl -fsSL \
+                --retry 3 \
+                --retry-delay 2 \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -H "X-GitHub-Api-Version: 2026-03-10" \
+                "https://api.github.com/repos/$REPO/releases/latest" \
+                2>/dev/null || true)
+
+              # --------------------------------------
+              # API 请求失败
+              # --------------------------------------
+
+              if [ -z "$RESPONSE" ]; then
+                  echo "⚠ GitHub API 请求失败，跳过"
+                  continue
+              fi
+
+              # --------------------------------------
+              # 获取 Release 信息
+              # --------------------------------------
+
+              TAG=$(echo "$RESPONSE" | jq -r '.tag_name // empty')
+              NAME=$(echo "$RESPONSE" | jq -r '.name // empty')
+              URL=$(echo "$RESPONSE" | jq -r '.html_url // empty')
+              PUBLISHED=$(echo "$RESPONSE" | jq -r '.published_at // empty')
+              BODY=$(echo "$RESPONSE" | jq -r '.body // empty')
+              PRERELEASE=$(echo "$RESPONSE" | jq -r '.prerelease // false')
+
+              # --------------------------------------
+              # 没有 Release
+              # --------------------------------------
+
+              if [ -z "$TAG" ]; then
+                  echo "没有找到 Release，跳过"
+                  continue
+              fi
+
+              echo "最新版本：$TAG"
+              echo "Release：$NAME"
+              echo "Pre-release：$PRERELEASE"
+
+              # --------------------------------------
+              # 获取历史版本
+              # --------------------------------------
+
+              OLD_TAG=$(jq -r \
+                --arg repo "$REPO" \
+                '.[$repo] // ""' \
+                "$STATE_FILE")
+
+              if [ -z "$OLD_TAG" ]; then
+                  echo "历史版本：无"
+              else
+                  echo "历史版本：$OLD_TAG"
+              fi
+
+              # ======================================
+              # 第一次监控
+              # ======================================
+
+              if [ -z "$OLD_TAG" ]; then
+
+                  echo ""
+                  echo "首次发现项目"
+                  echo "记录当前版本：$TAG"
+                  echo "首次运行不发送通知"
+
+                  jq \
+                    --arg repo "$REPO" \
+                    --arg tag "$TAG" \
+                    '.[$repo] = $tag' \
+                    "$STATE_FILE" > state.tmp
+
+                  mv state.tmp "$STATE_FILE"
+
+                  changed=true
+
+                  continue
+              fi
+
+              # ======================================
+              # 版本没有变化
+              # ======================================
+
+              if [ "$OLD_TAG" = "$TAG" ]; then
+
+                  echo "✓ 没有更新"
+
+                  continue
+              fi
+
+              # ======================================
+              # 发现新 Release
+              # ======================================
+
+              echo ""
+              echo "🎉 发现新 Release！"
+              echo "$OLD_TAG → $TAG"
+
+              # --------------------------------------
+              # 截取 Release Notes
+              # 最多显示 2000 个字符
+              # --------------------------------------
+
+              NOTES="$BODY"
+
+              if [ ${#NOTES} -gt 2000 ]; then
+                  NOTES="${NOTES:0:2000}
+
+……（Release Notes 内容过长，已截断）"
+              fi
+
+              # 如果没有 Release Notes
+              if [ -z "$NOTES" ]; then
+                  NOTES="（此 Release 没有提供更新说明）"
+              fi
+
+              # --------------------------------------
+              # 处理发布时间
+              # --------------------------------------
+
+              if [ -z "$PUBLISHED" ]; then
+                  PUBLISHED="未知"
+              fi
+
+              # ======================================
+              # 构造 ntfy 消息
+              # ======================================
+
+              MESSAGE="项目：$REPO
+
+旧版本：$OLD_TAG
+新版本：$TAG
+
+发布时间：$PUBLISHED
+
+更新说明：
+$NOTES
+
+查看 Release：
+$URL"
+
+              # ======================================
+              # 发送 ntfy
+              # ======================================
+
+              echo "正在发送 ntfy 通知..."
+
+              curl \
+                --fail \
+                --retry 3 \
+                --retry-delay 2 \
+                -X POST \
+                -H "Title: GitHub Release 更新" \
+                -H "Priority: high" \
+                -H "Tags: github,package" \
+                -H "Click: $URL" \
+                --data-binary "$MESSAGE" \
+                "https://ntfy.sh/$NTFY_TOPIC"
+
+              echo ""
+              echo "✓ ntfy 通知发送成功"
+
+              # ======================================
+              # 只有通知成功后才更新版本
+              # ======================================
+
+              jq \
+                --arg repo "$REPO" \
+                --arg tag "$TAG" \
+                '.[$repo] = $tag' \
+                "$STATE_FILE" > state.tmp
+
+              mv state.tmp "$STATE_FILE"
+
+              changed=true
+
+          done < "$REPO_FILE"
+
+          # ==========================================
+          # 保存 state.json
+          # ==========================================
+
+          if [ "$changed" = true ]; then
+
+              echo ""
+              echo "========================================"
+              echo "更新 state.json"
+              echo "========================================"
+
+              git config user.name \
+                "github-actions[bot]"
+
+              git config user.email \
+                "41898282+github-actions[bot]@users.noreply.github.com"
+
+              git add "$STATE_FILE"
+
+              if ! git diff --cached --quiet; then
+
+                  git commit -m "Update release monitor state"
+
+                  git push
+
+                  echo "✓ state.json 已保存"
+
+              else
+
+                  echo "没有需要提交的变化"
+
+              fi
+
+          else
+
+              echo ""
+              echo "没有任何版本变化"
+          fi
+
+          echo ""
+          echo "========================================"
+          echo "检查完成"
+          echo "========================================"
