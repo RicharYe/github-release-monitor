@@ -2,7 +2,7 @@ name: GitHub Release Monitor
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "30 4 * * *"
   workflow_dispatch:
 
 permissions:
